@@ -37,7 +37,6 @@ pipeline {
                 }
             }
         }
-
         
         stage ('Verify Data'){
             steps {
