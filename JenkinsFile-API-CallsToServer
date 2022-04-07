@@ -1,0 +1,175 @@
+#!/groovy
+/*
+* Date : 30.03.2022
+* Author : Shahar Weiss
+* Description : Job will use api to connect to instances and use put/delete/get account vs group
+*/
+@Library('shared-library-kit') _
+
+def pwdForToken
+def userName = "sysadmin"
+     
+def instanceKeyNameMap = [
+                    "https://manage.develop.something.net" : "admin01",
+                    "https://stg.something.com" : "admin02",
+                    "https://app.somethingz.com" : "admin03"
+                    ]
+
+
+    
+    pipeline {
+        agent { node { label 'slave-general' } }
+        
+        parameters {
+            string(name: 'accountId',description: 'Enter account number' )
+            string(name: 'group', description: 'Enter group')
+            choice(name: 'instance', choices: ['https://manage.develop.something.net','https://stg.something.com','https://app.somethingz.com'], description: 'Select Instance')
+            choice(name: 'action', choices: ['GET','PUT','DELETE'], description: 'Select Instance')
+
+            
+        }
+    
+        options {
+            timestamps()
+            timeout(time: 1, unit: 'HOURS')
+            skipDefaultCheckout()
+        }
+    
+      stages {
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    stageOwner="DevOps@mail.com"
+                    kit.Info_Msg("Stage Owner: " + stageOwner)
+                    currentBuild.description = "Account: ${accountId}, Group: ${group}, Instance: ${instance}, Action: ${action}"
+
+                }
+            }
+        }
+        
+        stage('Varify data + set data') {
+            steps {
+                script {
+                    accountIdEmpty = (!(accountId != "" && accountId != null))
+                    groupEmpty = (!(group != "" && group != null))
+                    
+                    if (action == 'GET'){
+                        if (accountIdEmpty){
+                            msg = "Account cannot be empty while using ${action}"
+                            kit.Error_Msg(msg)
+                            error msg
+                        }
+                    }else {
+                        if (accountIdEmpty || groupEmpty){
+                            msg = "Cannot use ${action} without missing parameters"
+                            kit.Error_Msg(msg)
+                            error msg
+
+                        }
+                    }
+                    kit.Info_Msg("Going to run on Account: ${accountId}, Group: ${group}, action ${action}")
+                    pwdForToken = getSecretFromAzureKeyVault(instanceKeyNameMap[instance])
+                }
+            }
+        }
+
+          stage('Get API Token') {
+            steps {
+                script {
+                    url = instance + "/web/handlers/DataHandler.ashx?action=loginandgettoken"
+                    //We dont want console output the api call, is has the password
+
+                    command = """set +x && curl --location --request POST ${url} --form 'username=${userName}' --form 'password=${pwdForToken}' |  jq -r '.token' > token.txt &&  set -x  """
+                 
+                    kit.Command_Execution_Sh(command)
+                    token = readFile('token.txt').trim()
+                    
+                    if (token == "null"){
+                         error "Could not get token."
+
+                    }
+                  
+                }
+            }
+        }
+
+        
+          stage('Send Rest API') {
+            steps {
+                script {
+                    def command
+                    switch (action){
+                        case "GET":
+                            command = "curl --location --request ${action} '${instance}/api/accounts/${accountId}/groups' --header 'Content-Type: application/json' --header 'Authorization: Bearer ${token}' "
+                            break;
+                        case "PUT":
+                            command =  """curl --location --request ${action} '${instance}/api/accounts/${accountId}/groups' --header 'Content-Type: application/json' --header 'Authorization: Bearer ${token}' --data-raw '{"accountId": ${accountId},"groupName": "${group}"}' """
+                            break;
+                        case "DELETE":
+                            command = """curl --location --request ${action} '${instance}/api/accounts/${accountId}/groups/${group}' --header 'Content-Type: application/json' --header 'Authorization: Bearer ${token}' """
+                            break;
+                    }
+                                      
+                   try {
+                       bashCommand = """ set +x && ${command} > answer.json && set -x"""
+                      
+                        kit.Command_Execution_Sh(bashCommand)
+                        
+                        respone = readFile('answer.json').trim()
+                        kit.Info_Msg(prettyJson(respone))
+
+                   } 
+                   catch (Exception x){
+                       error "Error sending request : ${x}"
+                   }
+                }
+            }
+        }
+    
+    }
+           
+        post {
+            success {
+                script {
+                    kit.Info_Msg("BUILD Succeeded")
+                }
+            }
+            failure {
+                script {
+                   kit.Error_Msg("BUILD FAILED: PLEASE CHECK ERRORS IN BUILD OUTPUT")
+                }
+            }
+            unstable {
+                script {
+                    kit.Error_Msg("BUILD UNSTABLE: PLEASE CHECK ERRORS IN BUILD OUTPUT")
+                }
+            }
+            cleanup {
+                cleanWs()
+            }
+        }
+    }
+    
+
+def prettyJson(data){
+        return data.replace("{","\n{\n\t").replace(",",",\n\t").replace("}","\n}")
+}
+
+
+
+
+ def getSecretFromAzureKeyVault(secretName) {
+    def azureKeyVault = getAzureKeyVaultUrl()
+    def spn = "jenkins-spn" // jenkins service principle + JENKINS PLUGIN
+    def secrets = [
+        [ $class: 'KeyVaultSecret', secretType: 'Secret', name: secretName, version: '', envVariable: 'keyVault' ]
+    ]
+    wrap([$class: '...',
+        azureKeyVaultSecrets: ...,
+        keyVaultURLOverride: ...,
+        credentialIDOverride: ...
+    ]) {
+        return AzureKeyVaultSecret
+    }
+}
