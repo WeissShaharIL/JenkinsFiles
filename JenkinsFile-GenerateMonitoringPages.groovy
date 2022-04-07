@@ -5,7 +5,8 @@ Author : Shahar Weiss
 Job is get trigged by job called : Application-CheckServiceBusErrors.
 it uses the data passed by the former job to create a static html page.
 it then continue to the second part where it builds another 2 static web pages by connecting to azure aplication insight and downloading data
-from failures queues. after all data is present, the job updates webapp to deliver the static web pages
+from failures queues. after all data is present, the job updates webapp to deliver the static web pages.
+Date : 01.03.222 Added feature to open Jira tickets - Blockers
 
 */
 @Library('shared-library-kit') _
@@ -19,9 +20,17 @@ import groovy.json.JsonSlurperClassic
 def teamsURL = "..."
 
 //This part is so for the ServiceBus html build
-def srvsBusRenamingTable = ["web" : "Monolith"]
+
+//def srvsBusRenamingTable = ["web" : "Monolith"]
+def farmsForAzureKey = ['...','...-STG','...']
+
+def farmsKeys = []
+def maxErrorsToShow = 10
+def jiraData = [][]
+
+def farmExcludeFromServiceBusDataCreator = ['FARM1BETA','SOFTWARE']
 def srvsBusFullData = [][]
-def srvsBusProdNamespaces = ['...','...','...','...','...']
+def srvsBusProdNamespaces = ['..']
 def spacer = """<tr>              
                 %%%SPACERDATA%%%
                 </tr> """.stripMargin()
@@ -88,11 +97,65 @@ def srvsBusHtmlEnd = """</body>
                 </table>
                 </html>""".stripMargin()
 
+def servcBusDataTemplate = """<!DOCTYPE html>
+            <html>
+            <head>
+            <title>%%%FARMSERVICE%%%</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+            table {
+            width:900px;
+            }  
+            td {
+                text-align: center;   
+                width:50%
+            }
+            .shrink {
+            white-space: nowrap; 
+            width: 800px;     
+            overflow: hidden;
+            text-overflow: ellipsis;
+            }
+            p.info {
+            font-weight: bold;
+            }
+
+            </style>
+            </head>
+            <body style="background-color: #cff0fa;">
+            %%%SERVICEBUSDATAREPLACE%%%
+            <script>
+            const tds = document.querySelectorAll('td div');
+            tds.forEach(td => {
+            td.addEventListener('click', () => {
+                td.classList.toggle('shrink')
+            })
+            })
+
+            </script>
+            </body>
+            </html>""".stripMargin()
+
 def nameSpaces=[]
 def linesFullData=[]
 def devServices=[]
 def serviceList=[]
 def txt
+
+//Adding option to click on service bus error and get data
+
+def bashScript = """#!/bin/bash
+    EVENTHUB_URI=\$1
+    SHARED_ACCESS_KEY_NAME=\$2
+    SHARED_ACCESS_KEY=\$3
+    ENCODED_URI=\$(echo -n \$EVENTHUB_URI | jq -s -R -r @uri)
+    TTL=\$((\$(date +%s) + 3600)) # Default token expiry is 4 hour
+    UTF8_SIGNATURE=\$(printf "%s\n%s" \$ENCODED_URI \$TTL | iconv -t utf8)
+    HASH=\$(echo -n "\$UTF8_SIGNATURE" | openssl sha256 -hmac \$SHARED_ACCESS_KEY -binary | base64)
+    ENCODED_HASH=\$(echo -n \$HASH | jq -s -R -r @uri)
+    echo "SharedAccessSignature sr=\$ENCODED_URI&sig=\$ENCODED_HASH&se=\$TTL&skn=\$SHARED_ACCESS_KEY_NAME"
+""".stripMargin()
+
 //End of serviceBus html build
 
 //Application insight part
@@ -143,17 +206,17 @@ def indexHTML = """<html>
     <title>Monitor</title>
     <h1 style="text-align: center;">DevOps Monitoring Page</h1>
     <body style="background-color: #cff0fa;">
-    <pre>View Application Insight failures - By roles (PROD)       <button class="button" onclick="window.location.href='appInsight24.html'">24Hrs</button> <button class="button" onclick="window.location.href='appInsight7.html'">Week</button></pre>
-    <pre>View Application Insight failures - By roles (STG)        <button class="button" onclick="window.location.href='STG-appInsight24.html'">24Hrs</button> <button class="button" onclick="window.location.href='STG-appInsight7.html'">Week</button></pre>
-    <pre>View service bus error queue (Updated every ~5 min)       <button class="button" onclick="window.location.href='servicebusmonitor.html'">View</button></pre>
+    <pre>View Application Insight failures - By roles (PROD)       <button class="button" onclick="window.location.href='...-appInsight24.html'">24Hrs</button> <button class="button" onclick="window.location.href='...-appInsight7.html'">Week</button></pre>
+    <pre>View Application Insight failures - By roles (STG)        <button class="button" onclick="window.location.href='...-STG-appInsight24.html'">24Hrs</button> <button class="button" onclick="window.location.href='...-STG-appInsight7.html'">Week</button></pre>
+    <pre>View service bus error queue (Updated every ~15 min)      <button class="button" onclick="window.location.href='servicebusmonitor.html'">View</button></pre>
     <pre>Application insight - DDos Attack                         <button class="button" onclick="window.location.href='appddos.html'">View</button></pre>
     </body>
     </head>
     </html>""".stripMargin()
 
 def resourceGroup 
-def roles = ["Service1","Service2",'Service3','Service4','Service5']
-def farmsAppinsight = ["farm1","farm1-STG"]
+def roles = ["..."]
+def farmsAppinsight = ["...","...-STG"]
 def htmlStart ="""<html>
   <head>
     <title>Service-Exception monitor</title>
@@ -249,19 +312,19 @@ def functionTemplate="""function %FUNCNAME%() {
 
 //DDos Part
 
-def mapArrayVsFarm = [0 : "FARM1",
-              1 : "FARM2", 
-              2 : "FARM3",
-              3 : "FARM4", 
-              4 : "FARM5"
+def mapArrayVsFarm = [0 : "...",
+              1 : "FARM1", 
+              2 : "EU",
+              3 : "US", 
+              4 : "ASIA"
               ]
 
 
-def mapData = ["FARM1": 'farm1-AI',
-              "FARM2": 'farm1-AI', 
-              "FARM3": "farm2-AI",
-              "FARM4": "farm3-AI", 
-              "FARM5": "farm4-AI"
+def mapData = ["...": "12-AI",
+              "FARM1": 'FARM1-AI', 
+              "EU": "eu-AI",
+              "US": "us-AI", 
+              "ASIA": "asia-AI"
               ]
 
 
@@ -366,7 +429,6 @@ def badIpHtml = """<!DOCTYPE html>
 def htmlDataReplace = ""
 
 def appName
-def whiteListIps = ['1.2.3.4']
 
 def threshHold = 50
 def urlThreshHold = 20
@@ -379,7 +441,7 @@ def timeStamp = Get_Current_Date()
 
 
     pipeline {
-        agent { node { label 'general-new'} }
+        agent { node { label 'aks-slave'} }
         
         parameters {
             string(name: 'data', description: 'data')
@@ -392,14 +454,27 @@ def timeStamp = Get_Current_Date()
             }
         
         stages {
-             stage('Cleanup') {
+             stage('Cleanup + create bash script') {
                  steps {
                      script {
-                         stageOwner="DevOps@mail.com"
+                         stageOwner="DevOps@....com"
                          kit.Info_Msg("Stage Owner: " + stageOwner)
                          kit.Info_Msg("Fetching Data from roles: ${roles}")                    
                          kit.Info_Msg("Servicebus Html : ${data}")                    
+                         writeFile(file: 'sas.sh', text: bashScript)
+                         sh "chmod +x sas.sh"
                         
+                        }
+                    }
+                }
+        
+        stage('Download keys for azure') {
+            steps {
+                script {
+                    //add protection for failing
+                    for (farm in farmsForAzureKey){                             
+                        farmsKeys.add(azure.getSecretFromAzureKeyVault("...-${farm}-listen"))
+                    }
                 }
             }
         }
@@ -407,7 +482,7 @@ def timeStamp = Get_Current_Date()
         stage('ServiceBus - Data manipulation') {
             steps {
                 script {
-                    data = data.replaceAll("-----ENDOFNAMESPACE-----","-----ENDOFNAMESPACE-----\n").replaceAll("\'\\{\\\\\'","\n").replaceAll("\\\\':\\\\\'",":").replaceAll("\\\\\',\\\\\'","\n")
+                    data = data.replaceAll("-----ENDOFNAMESPACE-----","-----ENDOFNAMESPACE-----\n").replaceAll("\'\\{\\\\\'","\n").replaceAll("\\\\':\\\\\'",":").replaceAll("\\\\\',\\\\\'","\n").replaceAll("\\\\\'\\}\\'","\n")
                     kit.Info_Msg("Data: " + data)
                 }
             }
@@ -428,9 +503,7 @@ def timeStamp = Get_Current_Date()
                                 break
                             }
                             txt = line.split(":")[0].replace("-error","")
-                            if (srvsBusRenamingTable.containsKey(txt)){
-                                txt = srvsBusRenamingTable[txt]
-                            }
+                         
                             if (startAdding){
                                 serviceList.add(txt.capitalize())
                             }
@@ -450,10 +523,10 @@ def timeStamp = Get_Current_Date()
                 }
             }
             
-            stage('Convert Data 2d Array') {
-                steps {
-                    script {
-                        index = 0
+        stage('Convert Data 2d Array') {
+            steps {
+                script {
+                    index = 0
                         def dataToAdd = []
                         
                         for (line in data.split("\n")){
@@ -463,11 +536,6 @@ def timeStamp = Get_Current_Date()
                             }
                             else {
                                 txt = line.replace("-error","")
-                                if (srvsBusRenamingTable.containsKey(txt.split(":")[0])){
-                                    //rename if needed
-                                    temp = txt.split(":")[0]
-                                    txt = txt.replace(temp,srvsBusRenamingTable[temp])
-                                }
                                 dataToAdd.add(txt.capitalize())
                             }
                         }
@@ -476,231 +544,316 @@ def timeStamp = Get_Current_Date()
                 }
             }
             
-            stage('Build prod table') {
-                steps {
-                    script {
-                        for (item in srvsBusFullData){
-                            if (item[0].toLowerCase() in srvsBusProdNamespaces){
-                                name = item[0].toUpperCase()
-                                srvsBusHtmlProd += """<td style="width: 200px; font-size:130%; text-align: center; background-color: #dcedf2;"><strong>${name}</strong></td>\n"""
-                                for (service in serviceList){
-                                    found = false
-                                    for (data in item){
-                                        if (data.split(":")[0] == service){
-                                            found = true
-                                            num = data.split(":")[1]
-                                            break 
-                                        }
+        stage('Build prod+dev table') {
+            steps {
+                script {
+                    for (item in srvsBusFullData){
+                        if (item[0].toLowerCase() in srvsBusProdNamespaces){
+                            name = item[0].toUpperCase()
+                            srvsBusHtmlProd += """<td style="width: 200px; font-size:130%; text-align: center; background-color: #dcedf2;"><strong>${name}</strong></td>\n"""
+                            for (service in serviceList){
+                                found = false
+                                for (data in item){
+                                    if (data.split(":")[0] == service){
+                                        found = true
+                                        num = data.split(":")[1]
+                                        break 
                                     }
-                                    if (found){
-                                        if (num == "0"){
-                                            srvsBusHtmlProd += """<td style="width: 200px; font-size:130%; height: 40px; text-align: center;"><span style="color: #000000; background-color: #00ff00;">Good</span></td>\n"""
-                                        } 
-                                        else {
-                                            srvsBusHtmlProd += """<td style="width: 200px; height: 40px; text-align: center;"><p class="blink">${num}</p></td>\n"""
-                                        }
-                                    } else {
-                                        srvsBusHtmlProd += """<td style="width: 200px; height: 40px; text-align: center;"><span style="color: #000000">---</span></td>\n"""
-                                      }
                                 }
-                                srvsBusHtmlProd += "</tr>\n"
-                            }
 
-                            else {
-                                name = item[0].toUpperCase()
-                                srvsBusHtmlDev += """<td style="width: 200px; font-size:130%; text-align: center; background-color: #dcedf2;"><strong>${name}</strong></td>"""
-                                for (service in serviceList){
-                                    found = false
-                                    for (data in item){
-                                        if (data.split(":")[0] == service){
-                                            found = true
-                                            num = data.split(":")[1]
-                                            break 
-                                        }
+                                if (found){
+                                    if (num == "0"){
+                                        srvsBusHtmlProd += """<td style="width: 200px; font-size:130%; height: 40px; text-align: center;"><span style="color: #000000; background-color: #00ff00;">Good</span></td>\n"""
                                     }
-                                    if (found){
-                                        if (num == "0"){
-                                            srvsBusHtmlDev += """<td style="width: 200px; font-size:130%; height: 40px; text-align: center;"><span style="color: #000000; background-color: #00ff00;">Good</span></td>\n"""
-                                        } 
-                                        else {
+                                else {
+                                    if (name in farmExcludeFromServiceBusDataCreator){
+                                        //consider removing this since all production farms are being checked
+                                        srvsBusHtmlDev += """<td style="width: 200px; height: 40px; text-align: center;"><p class="blink">${num}</p></td>\n"""
+                                    }
+                                    else {
+                                        index = 0
+                                        for (itemRef in farmsForAzureKey){
+                                            if (itemRef == name){
+                                                break;
+                                            }
+                                        index++
+                                        }
+                                    //Add farm+service to data for later jira issue
+                                    jiraData.add([name,service])
+                                    
+                                    url = "https://...-" + name.toLowerCase() + ".servicebus.windows.net"
+                                    queue = "...-"+service+"-error"
+                                    keyName = "...-"+name.toLowerCase()+"-listen"
+                                    keySecret = farmsKeys[index]
+                                    
+                                    token = kit.Command_Execution_Sh_New("""./sas.sh ${url}/${queue} ${keyName} ${keySecret}""",debug=false,clean=false) 
+                                    refLink = "${name}-${service}-data.html"
+                                    
+                                    if (token){
+                                        servcBusDataTemplateNew = servcBusDataTemplate.replace("%%%SERVICEBUSDATAREPLACE%%%",buildTable(url, queue, token, maxErrorsToShow)).replace("%%%FARMSERVICE%%%","${name}-${service}")
+                                        writeFile(file: refLink, text: servcBusDataTemplateNew)
+                                        }
+                                    else {
+                                        servcBusDataTemplateNew = servcBusDataTemplate.replace("%%%SERVICEBUSDATAREPLACE%%%","Error fetching data, check jenkins log").replace("%%%FARMSERVICE%%%","${name}-${service}")
+                                        writeFile(file: refLink, text: servcBusDataTemplateNew)
+                                    }
+                                    
+                                    srvsBusHtmlProd += """<td style="width: 200px; height: 40px; text-align: center;"><p class="blink"><a href="${refLink}">${num}</a></p></td>\n"""
+                                    }
+
+                                }
+                                }
+                                else {
+                                    srvsBusHtmlProd += """<td style="width: 200px; height: 40px; text-align: center;"><span style="color: #000000">---</span></td>\n"""
+                                }
+
+                            }
+                            srvsBusHtmlProd += "</tr>\n"
+                        }
+                        
+                        else {
+                            name = item[0].toUpperCase()
+                            srvsBusHtmlDev += """<td style="width: 200px; font-size:130%; text-align: center; background-color: #dcedf2;"><strong>${name}</strong></td>"""
+                            for (service in serviceList){
+                                found = false
+                                for (data in item){
+                                    if (data.split(":")[0] == service){
+                                        found = true
+                                        num = data.split(":")[1]
+                                        break 
+                                    }
+                                }
+                                
+                                if (found){
+                                    if (num == "0"){
+                                        srvsBusHtmlDev += """<td style="width: 200px; font-size:130%; height: 40px; text-align: center;"><span style="color: #000000; background-color: #00ff00;">Good</span></td>\n"""
+                                    } 
+                                  
+                                    
+                                    else {                        
+                                        if (name in farmExcludeFromServiceBusDataCreator){
                                             srvsBusHtmlDev += """<td style="width: 200px; height: 40px; text-align: center;"><p class="blink">${num}</p></td>\n"""
                                         }
-                                    } else {
-                                        srvsBusHtmlDev += """<td style="width: 200px; height: 40px; text-align: center;"><span style="color: #000000">---</span></td>\n"""
-                                      }
+                                        
+                                        else {
+                                            index = 0
+                                            for (itemRef in farmsForAzureKey){
+                                                if (itemRef == name){
+                                                    break;
+                                                }
+                                                index++
+                                            }
+                                            
+                                            //Add farm+service to data for later jira issue
+                                            jiraData.add([name,service])
+                                            
+                                            url = "https://...-" + name.toLowerCase() + ".servicebus.windows.net"
+                                            queue = "...-"+service+"-error"
+                                            keyName = "...-"+name.toLowerCase()+"-listen"
+                                            keySecret = farmsKeys[index]
+                                            
+                                            token = kit.Command_Execution_Sh_New("""./sas.sh ${url}/${queue} ${keyName} ${keySecret}""",debug=false,clean=false) 
+                                            refLink = "${name}-${service}-data.html"
+                                            if (token){
+                                                servcBusDataTemplateNew = servcBusDataTemplate.replace("%%%SERVICEBUSDATAREPLACE%%%",buildTable(url, queue, token, maxErrorsToShow)).replace("%%%FARMSERVICE%%%","${name}-${service}")
+                                                writeFile(file: refLink, text: servcBusDataTemplateNew)
+                                            }else {
+                                                servcBusDataTemplateNew = servcBusDataTemplate.replace("%%%SERVICEBUSDATAREPLACE%%%","Error fetching data, check jenkins log").replace("%%%FARMSERVICE%%%","${name}-${service}")
+                                                writeFile(file: refLink, text: servcBusDataTemplateNew)
+                                            }
+                                            
+                                            srvsBusHtmlDev += """<td style="width: 200px; height: 40px; text-align: center;"><p class="blink"><a href="${refLink}">${num}</a></p></td>\n"""
+                                        }
+                                    }
                                 }
-                            srvsBusHtmlDev += "</tr>\n"
+                                else {
+                                    srvsBusHtmlDev += """<td style="width: 200px; height: 40px; text-align: center;"><span style="color: #000000">---</span></td>\n"""
+                                }
                             }
+                            srvsBusHtmlDev += "</tr>\n"
                         }
-                      
                     }
                 }
             }
-            stage('Assemble ServiceBus HTML and write to disk') {
-                steps {
-                    script {
-                        fullTxt = srvsBusHtmlStart+srvsBusFirstHtmlTable+srvsBusHtmlProd+spacer+srvsBusHtmlDev+srvsBusHtmlEnd
-                        writeFile(file: 'servicebusmonitor.html', text: fullTxt)
-                    }
+        }
+        stage('Assemble ServiceBus HTML and write to disk') {
+            steps {
+                script {
+                    fullTxt = srvsBusHtmlStart+srvsBusFirstHtmlTable+srvsBusHtmlProd+spacer+srvsBusHtmlDev+srvsBusHtmlEnd
+                    writeFile(file: 'servicebusmonitor.html', text: fullTxt)
                 }
             }
-            stage ('Application Insight - Get RG + Add AZ extension'){
-                steps {
-                    script {
-                 
+        }
+      
+        
+
+
+        stage ('Application Insight - Get RG + Add AZ extension'){
+            steps {
+                script {
                     try {
                         kit.Command_Execution_Sh("az extension add --name application-insights")
-                        } catch (Exception x) {
-                            def msg = "Error cannot download az extension: ${x}"
-                            kit.Error_Msg(msg)
-                            error msg
-                            }
-                    }  
-                }          
-            }
+                    } 
+                    catch (Exception x) {
+                        def msg = "Error cannot download az extension: ${x}"
+                        kit.Error_Msg(msg)
+                        error msg
+                    }
+                }  
+            }          
+        }
 
-            stage ('Build First HTML'){
-                steps {
-                    script {
-                        for (farm in farmsAppinsight){
-                               
-                               if (farm == "FARM1"){
-                                   app = "farm1-AI"
-                               }
-                               else if (farm == "FARM1-STG") {
-                                   app = "farm1-stg-AI"
-                               }
-                               resourceGroup = azure.getAzureResourceGroupByResource(app, farm) //this also set the subscription
-                        
-                                for (role in roles){
-                                    command = """az monitor app-insights query --app ${app} --resource-group ${resourceGroup} --analytics-query "exceptions | where (cloud_RoleName == '${role}') | summarize _count=sum(itemCount) by type" --offset 24h"""
-                                    extraFuncName = role+"PieChart"
-                                    writeFile(file: 'command.sh', text: command)
-                                    kit.Command_Execution_Sh_New("chmod +x command.sh")
-                                    googleChartsTxt += "google.charts.setOnLoadCallback(${role});\n"
-                                    googleChartsTxtPie += "google.charts.setOnLoadCallback(${extraFuncName});\n"
-                                    tableTD += """<td><div id="${role}" style="border: 5px solid #ccc"></div></td>\n"""
-                                    textToAdd = ""
-                                    answer = kit.Command_Execution_Sh_New("./command.sh",debug=false, clean=false)
-                                    def slurper = new JsonSlurper().parseText(answer)
-                                    index=0
-                                    for (item in slurper.tables.rows){
-                                        while (item[index] != null){
-                                            textToAdd += item[index]
-                                            index++
-                                        }
-                                        //We need to modify the text so it would fit the HTML
-                                        textToAdd = textToAdd.replace("][","],\n\t[").replace("[","['").replace(", ","', ")
-                                    }
-                                    allFunctions += functionTemplate.replace("%FUNCNAME%",role).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd) +"\n"
-                                    allFunctions += functionTemplate.replace("%FUNCNAME%",extraFuncName).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd).replace("visualization.ColumnChart","visualization.PieChart") +"\n"
-                                    }
-                                    
-                                    //Build the tables
-                                    def counter = 0
-                                    while (roles[counter] != null){
-                                        htmlTablePart += """<table class="columns">\n\t<tr>\n\t"""
-                                        for (i=1; i <= itemPerRow; i++){
-                                            if (counter == roles.size()){
-                                                break
-                                            }
-                                            htmlTablePart += tableTD.split("\n")[counter]+"\n\t"
-                                            counter++
-                                            }
-                                            htmlTablePart += """</tr>\n\t</table>\n"""
-                                    }
-
-                                    //build final HTML
-                                    htmlEnd = htmlEnd.replace("%TIME%",timeStamp)
-                                    endFunction = endFunction.replace("%FUNCTIONPIEDATA%",googleChartsTxtPie).replace("%FUNCTIONCOLDATA%",googleChartsTxt)
-                                    finalHtml = (htmlStart+googleChartsTxt+allFunctions+endFunction+htmlTablePart+htmlEnd).replace("%%%UPDATETIME%%%","24 Hours")
-
-                                    filename = "${farm}-appInsight24.html"
-                                    writeFile(file: filename, text: finalHtml)
-                                    
-                                    //Remove command.sh, next step we're uploading the dir content
-                                    kit.Command_Execution_Sh("rm command.sh") 
-                        }
-                    }           
-                }
-            }
-
-            stage ('Build Second HTML'){
-                steps {
-                    script {
-                        //reset the variables
+        stage ('Build First HTML'){
+            steps {
+                script {
+                    for (farm in farmsAppinsight){
                         googleChartsTxt=""
                         googleChartsTxtPie=""
                         tableTD=""
                         allFunctions=""
                         htmlTablePart = ""
-                          for (farm in farmsAppinsight){
-                               if (farm == "FARM1"){
-                                   app = "farm1-AI"
-                               }
-                               else if (farm == "FARM1-STG") {
-                                   app = "farm1-stg-AI"
-                               }
-                               resourceGroup = azure.getAzureResourceGroupByResource(app, farm) //this also set the subscription
-
-
                         
-                                for (role in roles){
-                                    command = """az monitor app-insights query --app ${app} --resource-group ${resourceGroup} --analytics-query "exceptions | where (cloud_RoleName == '${role}') | summarize _count=sum(itemCount) by type" --offset 7d"""
-                                    extraFuncName = role+"PieChart"
-                                    writeFile(file: 'command.sh', text: command)
-                                    kit.Command_Execution_Sh_New("chmod +x command.sh")
-                                    googleChartsTxt += "google.charts.setOnLoadCallback(${role});\n"
-                                    googleChartsTxtPie += "google.charts.setOnLoadCallback(${extraFuncName});\n"
-                                    tableTD += """<td><div id="${role}" style="border: 5px solid #ccc"></div></td>\n"""
-                                    textToAdd = ""
-                                    answer = kit.Command_Execution_Sh_New("./command.sh",debug=false, clean=false)
-                                    def slurper = new JsonSlurper().parseText(answer)
-                                    index=0
-                                    for (item in slurper.tables.rows){
-                                        while (item[index] != null){
-                                            textToAdd += item[index]
-                                            index++
-                                    }
-                                    //We need to modify the text so it would fit the HTML
-                                    textToAdd = textToAdd.replace("][","],\n\t[").replace("[","['").replace(", ","', ")
+                        if (farm == "..."){
+                            app = "cam-12-AI"
+                        }
+                        
+                        else if (farm == "...-STG") {
+                            app = "cam-12-stg-AI"
+                        }
+                        
+                        resourceGroup = azure.getAzureResourceGroupByResource(app, farm) //this also set the subscription
+                        
+                        for (role in roles){
+                            command = """az monitor app-insights query --app ${app} --resource-group ${resourceGroup} --analytics-query "exceptions | where (cloud_RoleName == '${role}') | summarize _count=sum(itemCount) by type" --offset 24h"""
+                            extraFuncName = role+"PieChart"
+                            writeFile(file: 'command.sh', text: command)
+                            kit.Command_Execution_Sh_New("chmod +x command.sh")
+                            googleChartsTxt += "google.charts.setOnLoadCallback(${role});\n"
+                            googleChartsTxtPie += "google.charts.setOnLoadCallback(${extraFuncName});\n"
+                            tableTD += """<td><div id="${role}" style="border: 5px solid #ccc"></div></td>\n"""
+                            textToAdd = ""
+                            answer = kit.Command_Execution_Sh_New("./command.sh",debug=false, clean=false)
+                            def slurper = new JsonSlurper().parseText(answer)
+                            index=0
+                            for (item in slurper.tables.rows){
+                                while (item[index] != null){
+                                    textToAdd += item[index]
+                                    index++
                                 }
-                                    allFunctions += functionTemplate.replace("%FUNCNAME%",role).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd) +"\n"
-                                    allFunctions += functionTemplate.replace("%FUNCNAME%",extraFuncName).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd).replace("visualization.ColumnChart","visualization.PieChart") +"\n"
-                                }
-                                //Build the tables
-                                def counter = 0
-                                while (roles[counter] != null){
-                                    htmlTablePart += """<table class="columns">\n\t<tr>\n\t"""
-                                    for (i=1; i <= itemPerRow; i++){
-                                        if (counter == roles.size()){
-                                            break
-                                        }
-                                        
-                                        htmlTablePart += tableTD.split("\n")[counter]+"\n\t"
-                                        counter++
-                                    }
-                                    htmlTablePart += """</tr>\n\t</table>\n"""
-                                }
-                                //build final HTML
-
-                                htmlEnd = htmlEnd.replace("%TIME%",timeStamp)
-                                endFunction = endFunction.replace("%FUNCTIONPIEDATA%",googleChartsTxtPie).replace("%FUNCTIONCOLDATA%",googleChartsTxt)
-                                finalHtml = (htmlStart+googleChartsTxt+allFunctions+endFunction+htmlTablePart+htmlEnd).replace("%%%UPDATETIME%%%","7 Days")
-                                //change the chart
-
-                                filename = "${farm}-appInsight7.html"
-                                writeFile(file: filename, text: finalHtml)
-
-                               
-                                //Remove command.sh, next step we're uploading the dir content
-                                kit.Command_Execution_Sh("rm command.sh") 
-                          }
-                    }           
-                }
+                                //We need to modify the text so it would fit the HTML
+                                textToAdd = textToAdd.replace("][","],\n\t[").replace("[","['").replace(", ","', ")
+                            }
+                            allFunctions += functionTemplate.replace("%FUNCNAME%",role).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd) +"\n"
+                            allFunctions += functionTemplate.replace("%FUNCNAME%",extraFuncName).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd).replace("visualization.ColumnChart","visualization.PieChart") +"\n"
+                        }
+                        
+                    //Build the tables
+                    def counter = 0
+                    while (roles[counter] != null){
+                        htmlTablePart += """<table class="columns">\n\t<tr>\n\t"""
+                        for (i=1; i <= itemPerRow; i++){
+                            if (counter == roles.size()){
+                                break
+                            }
+                        
+                        htmlTablePart += tableTD.split("\n")[counter]+"\n\t"
+                        counter++
+                        }
+                        htmlTablePart += """</tr>\n\t</table>\n"""
+                    }
+                    
+                    //build final HTML
+                    htmlEnd = htmlEnd.replace("%TIME%",timeStamp)
+                    endFunction = endFunction.replace("%FUNCTIONPIEDATA%",googleChartsTxtPie).replace("%FUNCTIONCOLDATA%",googleChartsTxt)
+                    finalHtml = (htmlStart+googleChartsTxt+allFunctions+endFunction+htmlTablePart+htmlEnd).replace("%%%UPDATETIME%%%","24 Hours")
+                    filename = "${farm}-appInsight24.html"
+                    writeFile(file: filename, text: finalHtml)
+                    //Remove command.sh, next step we're uploading the dir content
+                    kit.Command_Execution_Sh("rm command.sh") 
+                    }
+                }           
             }
+        }
+        
+        
+
+        stage ('Build Second HTML'){
+            steps {
+                script {
+                    //reset the variables
+                    for (farm in farmsAppinsight){
+                        googleChartsTxt=""
+                        googleChartsTxtPie=""
+                        tableTD=""
+                        allFunctions=""
+                        htmlTablePart = ""
+                        if (farm == "..."){
+                            app = "cam-12-AI"
+                        }
+                        else if (farm == "...-STG") {
+                            app = "cam-12-stg-AI"
+                        }
+                        
+                        resourceGroup = azure.getAzureResourceGroupByResource(app, farm) //this also set the subscription
+                        for (role in roles){
+                            command = """az monitor app-insights query --app ${app} --resource-group ${resourceGroup} --analytics-query "exceptions | where (cloud_RoleName == '${role}') | summarize _count=sum(itemCount) by type" --offset 7d"""
+                            extraFuncName = role+"PieChart"
+                            writeFile(file: 'command.sh', text: command)
+                            kit.Command_Execution_Sh_New("chmod +x command.sh")
+                            googleChartsTxt += "google.charts.setOnLoadCallback(${role});\n"
+                            googleChartsTxtPie += "google.charts.setOnLoadCallback(${extraFuncName});\n"
+                            tableTD += """<td><div id="${role}" style="border: 5px solid #ccc"></div></td>\n"""
+                            textToAdd = ""
+                            answer = kit.Command_Execution_Sh_New("./command.sh",debug=false, clean=false)
+                            def slurper = new JsonSlurper().parseText(answer)
+                            index=0
+                            for (item in slurper.tables.rows){
+                                while (item[index] != null){
+                                    textToAdd += item[index]
+                                    index++
+                                }
+                            
+                            //We need to modify the text so it would fit the HTML
+                            textToAdd = textToAdd.replace("][","],\n\t[").replace("[","['").replace(", ","', ")
+                            }
+                            
+                            allFunctions += functionTemplate.replace("%FUNCNAME%",role).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd) +"\n"
+                            allFunctions += functionTemplate.replace("%FUNCNAME%",extraFuncName).replace("%TITLE%",role).replace("%ELEMENT%",role).replace("%ROWSDATA%",textToAdd).replace("visualization.ColumnChart","visualization.PieChart") +"\n"
+                        }
+                        
+                        //Build the tables
+                        def counter = 0
+                        while (roles[counter] != null){
+                            htmlTablePart += """<table class="columns">\n\t<tr>\n\t"""
+                            for (i=1; i <= itemPerRow; i++){
+                                if (counter == roles.size()){
+                                    break
+                                }
+                                
+                                htmlTablePart += tableTD.split("\n")[counter]+"\n\t"
+                                counter++
+                            }
+                            htmlTablePart += """</tr>\n\t</table>\n"""
+                        }
+                        
+                        //build final HTML
+                        
+                        htmlEnd = htmlEnd.replace("%TIME%",timeStamp)
+                        endFunction = endFunction.replace("%FUNCTIONPIEDATA%",googleChartsTxtPie).replace("%FUNCTIONCOLDATA%",googleChartsTxt)
+                        finalHtml = (htmlStart+googleChartsTxt+allFunctions+endFunction+htmlTablePart+htmlEnd).replace("%%%UPDATETIME%%%","7 Days")
+                        //change the chart
+                        filename = "${farm}-appInsight7.html"
+                        writeFile(file: filename, text: finalHtml)
+                        
+                        //Remove command.sh, next step we're uploading the dir content
+                        kit.Command_Execution_Sh("rm command.sh") 
+                    }
+                }           
+            }
+        }
+        
             
-            stage ('DDos Part get Data'){
+        stage ('DDos Part get Data'){
                 steps {
                     script {
                         query = """requests | where cloud_RoleName == 'Monolith-Front' | summarize Count=count() by client_IP | order by Count desc | where Count > ${threshHold}"""
@@ -739,36 +892,35 @@ def timeStamp = Get_Current_Date()
                     }
                 }
             }
-             stage('Build DDOS Html') {
-                 steps {
-                     script {
-                         index = 0
-                         htmlDataReplace += """<div id="Client_IP" class="tabcontent">\n<h2><center>By Client IP</center></h2>\n"""
-                         for (item in farmsData){
-                             currentFarm = (mapArrayVsFarm.get(index))
-                             index++
-                        
+          
+        stage('Build DDOS Html') {
+            steps {
+                script {
+                    index = 0
+                    htmlDataReplace += """<div id="Client_IP" class="tabcontent">\n<h2><center>By Client IP</center></h2>\n"""
+                    for (item in farmsData){
+                        currentFarm = (mapArrayVsFarm.get(index))
+                        index++
+                    
                         if (!item.isEmpty()){
                             htmlDataReplace += "<h3>&emsp;${currentFarm}</h3>\n<table>\n <tr>\n<th>IP</th>\n    <th>Requests</th>\n    <th>Country</th>\n  </tr>\n"
                             for (line in item){
                                 ip = line[0]
-                              
-                                    requests = line[1]
-                                    location = GetLocation(ip)
-                                    if (requests > 100){
-                                        teamsMessage = "Possible DDoS Attack coming up: Farm : ${currentFarm} From ${ip} Location: ${location}\nRquests in the last hour : ${requests}"
-                                        office365ConnectorSend message: teamsMessage, status:"Alert", webhookUrl: teamsURL
-                                    }
-                                htmlDataReplace += " <tr>\n    <td>${ip}</td>\n    <td>${requests}</td>\n    <td>${location}</td>\n  </tr>\n"
-                                //}
-                               
+                                requests = line[1]
+                                location = GetLocation(ip)
+                                if (requests > 100){
+                                    teamsMessage = "Possible DDoS Attack coming up: Farm : ${currentFarm} From ${ip} Location: ${location}\nRquests in the last hour : ${requests}"
+                                    office365ConnectorSend message: teamsMessage, status:"Alert", webhookUrl: teamsURL
+                                }
+                            htmlDataReplace += " <tr>\n    <td>${ip}</td>\n    <td>${requests}</td>\n    <td>${location}</td>\n  </tr>\n"
+                            }
+                            htmlDataReplace += "</table>\n"
                         }
-                        htmlDataReplace += "</table>\n"
-                        } else {
+                        else {
                             htmlDataReplace += "<h3>&emsp;${currentFarm}</h3>\n<p>Did not found any ip that has more than ${threshHold} requests in the last ${offset}</p>\n"
-                        }
-                    
+                        }                 
                     }
+                    
                     htmlDataReplace += """</div>\n<div id="URL" class="tabcontent"><h2><center>By URL</center></h2>"""
                     index = 0
                     
@@ -782,22 +934,47 @@ def timeStamp = Get_Current_Date()
                                 url = line[0]
                                 requests = line[1]
                                 htmlDataReplace += " <tr>\n    <td>${url}</td>\n    <td>${requests}</td>\n   </tr>\n"
+                            }
+                            htmlDataReplace += "</table>\n"
                         }
-                        htmlDataReplace += "</table>\n"
-                        } else {
+                        else {
                             htmlDataReplace += "<h3>&emsp;${currentFarm}</h3>\n<p>Did not found any URL that has more than ${urlThreshHold} requests in the last ${offset}</p>\n"
                         }
                     }
+
                     htmlDataReplace += "</div>"
                     ddosHtml = badIpHtml.replace("%%%DATA%%%",htmlDataReplace).replace("%TIME%",timeStamp)
-                    
                     writeFile(file: 'appddos.html', text: ddosHtml)
-
                 }
             }
         }
+        
+       
 
-            stage ('Create index.html + Push all htmls to WebApp'){
+        stage ('Issue Jira tickets'){
+            steps {
+                script {
+                    def branches = [:]
+                    index=0
+
+                     NOT YET IMPLEMENTED - READY TO USE WHEN NEEDED
+
+                    for (int i = 0; i < jiraData.size() -1; i++){
+                          def index = i //if we tried to use i below, it would equal 4 in each job execution.
+                               branches["Branch${i}"] = {
+                                     build job: 'Jira-BlockerIssuer', parameters: [string(name: 'project', value: "DEVOPS"), string(name: 'farm', value: jiraData[index][0]), string(name: 'service', value: jiraData[index][1]), string(name:'dummy', value: "${index}")]
+                               }
+               
+                    }
+
+                    parallel branches
+                    
+                    
+                    } 
+                }
+            }
+            
+        stage ('Create index.html + Push all htmls to WebApp'){
                 steps {
                     script {
                         writeFile(file: 'index.html', text: indexHTML)
@@ -920,4 +1097,78 @@ def GetLocation(ip){
     }
 
     return answer
+}
+
+
+def buildTable(url, queue, token,maxTableSize){
+    def tableData = ""
+    
+    index = 0
+    while (index < maxTableSize){
+       
+        answer = kit.Command_Execution_Sh_New("""curl --location --request POST '${url}/${queue}/messages/head' --header 'Content-Length: 0' --header 'Authorization: ${token}' """,debug=false,clean=false) 
+
+        //encoding
+        answer = answer.replace("<","&#x3C;").replace(">","&#x3E;").replace('"',"&#x22;")
+        answer = answer.replace("&#x3E;&#x3C;",'&#x3E;<br>&#x3C;')
+
+        
+        if (answer.trim().length() == 0){
+            println("no data")
+            return tableData
+
+        }
+
+       
+
+        tableData += "<table border>\n"
+        tableData +="<tr>\n"
+        tableData += "<td>" + answer + "</td>\n"
+        tableData += "</tr>\n"
+        
+      
+        tableData += "</table>\n<hr>\n"
+
+    index++
+
+
+    }
+    return tableData
+}
+
+
+
+def triggerJobs(jiraData){
+    stage ('Creating issues') {
+        parallel (
+            'Issue' : {
+                script {
+              
+                        kit.Info_Msg("Running job services")
+                        def jobsTuRun = [:] 
+
+                        for (item in jiraData){
+                            stage ("Creating for ${item}")
+                            jobsTuRun["Ticket ${item}"] = {
+                                try {
+                                    build job: 'Jira-BlockerIssuer', parameters: [string(name: 'project', value: "DEVOPS"), string(name: 'farm', value: item[0]), string(name: 'service', value:  item[1])]
+
+                                }
+                                catch (Exception x) {
+                                    msg = " Error trying to issue ticket ${item} : ${x}. "
+                                    errorArray = errorArray + msg 
+                                }
+                            }
+
+
+                        }
+                                               
+                        parallel branches
+                        cleanWs()
+                    
+                }
+            }
+               
+        )
+    }
 }
